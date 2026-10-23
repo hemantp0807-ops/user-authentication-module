@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}Dashboard | User Portal{% endblock %}
+{% block content %}
+<section class="card wide">
+  <p class="eyebrow">YOUR ACCOUNT</p>
+  <h1>Hello, {{ user.full_name }}!</h1>
+  <p class="muted">You are signed in successfully.</p>
+  <div class="details">
+    <p><span>Email</span><strong>{{ user.email }}</strong></p>
+    <p><span>Role</span><strong>{{ user.role }}</strong></p>
+    <p><span>Status</span><strong>{{ user.status }}</strong></p>
+    <p><span>Member since</span><strong>{{ user.created_at.strftime('%d %b %Y') }}</strong></p>
+  </div>
+  {% if user.role == 'admin' %}<a class="button" href="{{ url_for('admin_users') }}">Manage users</a>{% endif %}
+</section>
+{% endblock %}

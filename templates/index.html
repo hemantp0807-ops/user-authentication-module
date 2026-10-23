@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block title %}Welcome | User Portal{% endblock %}
+{% block content %}
+<section class="hero">
+  <p class="eyebrow">USER AUTHENTICATION MODULE</p>
+  <h1>Secure access, made simple.</h1>
+  <p>Register an account, verify your email, and access your dashboard securely.</p>
+  <div class="actions"><a class="button" href="{{ url_for('register') }}">Create account</a><a class="button secondary" href="{{ url_for('login') }}">Sign in</a></div>
+</section>
+{% endblock %}

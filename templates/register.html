@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}Register | User Portal{% endblock %}
+{% block content %}
+<section class="card">
+  <h1>Create account</h1>
+  <p class="muted">Register with your name, email, and password.</p>
+  <form method="post">
+    <label>Full name<input name="full_name" maxlength="100" required autocomplete="name"></label>
+    <label>Email<input type="email" name="email" maxlength="100" required autocomplete="email"></label>
+    <label>Password<input type="password" name="password" minlength="8" required autocomplete="new-password"></label>
+    <p class="hint">Minimum 8 characters. New registrations receive the standard user role.</p>
+    <button class="button full" type="submit">Register</button>
+  </form>
+  <p class="below">Already registered? <a href="{{ url_for('login') }}">Sign in</a></p>
+</section>
+{% endblock %}

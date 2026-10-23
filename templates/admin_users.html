@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}Manage Users | User Portal{% endblock %}
+{% block content %}
+<section class="card wide">
+  <h1>Registered users</h1>
+  <p class="muted">Admin-only view.</p>
+  <div class="table-wrap"><table>
+    <thead><tr><th>ID</th><th>Name</th><th>Email</th><th>Role</th><th>Status</th><th>Created</th></tr></thead>
+    <tbody>
+    {% for user in users %}
+      <tr><td>{{ user.user_id }}</td><td>{{ user.full_name }}</td><td>{{ user.email }}</td><td>{{ user.role }}</td><td>{{ user.status }}</td><td>{{ user.created_at.strftime('%d %b %Y') }}</td></tr>
+    {% else %}
+      <tr><td colspan="6">No users found.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+</section>
+{% endblock %}

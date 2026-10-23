@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}Login | User Portal{% endblock %}
+{% block content %}
+<section class="card">
+  <h1>Welcome back</h1>
+  <p class="muted">Sign in with your registered email address.</p>
+  <form method="post">
+    <label>Email<input type="email" name="email" required autocomplete="email"></label>
+    <label>Password<input type="password" name="password" required autocomplete="current-password"></label>
+    <button class="button full" type="submit">Login</button>
+  </form>
+  <p class="below"><a href="{{ url_for('forgot_password') }}">Forgot password?</a></p>
+  <p class="below">New here? <a href="{{ url_for('register') }}">Create an account</a></p>
+</section>
+{% endblock %}
