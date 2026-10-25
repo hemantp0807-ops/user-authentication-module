@@ -181,7 +181,7 @@ def register():
                 "password": password,
                 "options": {
                     "data": {"full_name": full_name},
-                    "email_redirect_to": url_for("auth_callback", _external=True),
+                    "email_redirect_to": f"{os.getenv('SITE_URL').rstrip('/')}/auth/callback",
                 },
             })
 
