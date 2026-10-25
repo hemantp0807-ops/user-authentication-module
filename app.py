@@ -1,13 +1,14 @@
 import os
-import secrets
-from datetime import datetime, timedelta
+from datetime import timedelta
 from functools import wraps
 
 import psycopg2
 from psycopg2.extras import RealDictCursor
 from dotenv import load_dotenv
-from flask import Flask, render_template, request, redirect, url_for, flash, session
-from werkzeug.security import generate_password_hash, check_password_hash
+from flask import (
+    Flask, render_template, request, redirect, url_for, flash, session
+)
+from supabase import create_client
 
 load_dotenv()
 
@@ -15,11 +16,20 @@ app = Flask(__name__)
 
 SECRET_KEY = os.getenv("SECRET_KEY")
 DATABASE_URL = os.getenv("DATABASE_URL")
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 
 if not SECRET_KEY:
     raise RuntimeError("SECRET_KEY is missing. Add it to your .env file.")
 if not DATABASE_URL:
     raise RuntimeError("DATABASE_URL is missing. Add it to your .env file.")
+if not SUPABASE_URL or not SUPABASE_KEY:
+    raise RuntimeError("SUPABASE_URL and SUPABASE_KEY are missing from .env.")
+
+def get_auth_client():
+    """Create an isolated Auth client per request to avoid shared user sessions."""
+    return create_client(SUPABASE_URL, SUPABASE_KEY)
+
 
 app.config.update(
     SECRET_KEY=SECRET_KEY,
@@ -28,6 +38,7 @@ app.config.update(
     SESSION_COOKIE_SECURE=os.getenv("COOKIE_SECURE", "0") == "1",
     PERMANENT_SESSION_LIFETIME=timedelta(minutes=30),
 )
+
 
 def get_db():
     """Open a connection to Supabase PostgreSQL."""
@@ -38,39 +49,57 @@ def get_db():
         sslmode="require",
     )
 
+
 def init_db():
-    """Create the tables used by this application if they do not exist."""
+    """Create application profile tables if they do not exist."""
     with get_db() as conn:
         with conn.cursor() as cur:
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS users (
                     user_id SERIAL PRIMARY KEY,
+                    auth_user_id UUID UNIQUE,
                     full_name VARCHAR(100) NOT NULL,
                     email VARCHAR(100) UNIQUE NOT NULL,
-                    password_hash VARCHAR(255) NOT NULL,
+                    password_hash VARCHAR(255),
                     role VARCHAR(255) NOT NULL DEFAULT 'user',
                     status VARCHAR(10) NOT NULL DEFAULT 'inactive'
                         CHECK (status IN ('active', 'inactive')),
                     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
                 )
             """)
+            # Safe migrations for a pre-existing users table.
+            cur.execute("ALTER TABLE public.users ADD COLUMN IF NOT EXISTS auth_user_id UUID UNIQUE")
+            cur.execute("ALTER TABLE public.users ALTER COLUMN password_hash DROP NOT NULL")
+            # Old token tables are retained for data safety but are no longer used.
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS email_verifications (
-                    user_id INTEGER PRIMARY KEY
-                        REFERENCES users(user_id) ON DELETE CASCADE,
+                    user_id INTEGER PRIMARY KEY REFERENCES users(user_id) ON DELETE CASCADE,
                     token VARCHAR(255) UNIQUE NOT NULL,
                     expires_at TIMESTAMP NOT NULL
                 )
             """)
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS password_resets (
-                    user_id INTEGER PRIMARY KEY
-                        REFERENCES users(user_id) ON DELETE CASCADE,
+                    user_id INTEGER PRIMARY KEY REFERENCES users(user_id) ON DELETE CASCADE,
                     token VARCHAR(255) UNIQUE NOT NULL,
                     expires_at TIMESTAMP NOT NULL
                 )
             """)
         conn.commit()
+
+
+def current_user():
+    user_id = session.get("user_id")
+    if not user_id:
+        return None
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT user_id, auth_user_id, full_name, email, role, status, created_at
+                FROM public.users WHERE user_id = %s
+            """, (user_id,))
+            return cur.fetchone()
+
 
 def login_required(view):
     @wraps(view)
@@ -78,8 +107,14 @@ def login_required(view):
         if not session.get("user_id"):
             flash("Please log in first.")
             return redirect(url_for("login"))
+        user = current_user()
+        if not user or user["status"] != "active":
+            session.clear()
+            flash("Your account is inactive. Please log in again.")
+            return redirect(url_for("login"))
         return view(*args, **kwargs)
     return wrapped
+
 
 def role_required(*roles):
     def decorator(view):
@@ -100,31 +135,22 @@ def role_required(*roles):
         return wrapped
     return decorator
 
-def current_user():
-    user_id = session.get("user_id")
-    if not user_id:
-        return None
-    with get_db() as conn:
-        with conn.cursor() as cur:
-            cur.execute("""
-                SELECT user_id, full_name, email, role, status, created_at
-                FROM users
-                WHERE user_id = %s
-            """, (user_id,))
-            return cur.fetchone()
 
 @app.context_processor
 def inject_user():
     try:
         return {"logged_in_user": current_user()}
     except psycopg2.Error:
+        app.logger.exception("Could not load current profile")
         return {"logged_in_user": None}
+
 
 @app.route("/")
 def index():
     if session.get("user_id"):
         return redirect(url_for("dashboard"))
     return render_template("index.html")
+
 
 @app.route("/register", methods=["GET", "POST"])
 def register():
@@ -140,68 +166,65 @@ def register():
             flash("Password must contain at least 8 characters.")
             return render_template("register.html")
 
-        token = secrets.token_urlsafe(32)
-        expires_at = datetime.utcnow() + timedelta(hours=24)
-        password_hash = generate_password_hash(password)
-
         try:
+            # Avoid creating an Auth user when a legacy profile already owns this email.
+            with get_db() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT user_id FROM public.users WHERE email = %s", (email,))
+                    if cur.fetchone():
+                        flash("An account with this email already exists. Contact the administrator to migrate it.")
+                        return render_template("register.html")
+
+            auth = get_auth_client()
+            result = auth.auth.sign_up({
+                "email": email,
+                "password": password,
+                "options": {
+                    "data": {"full_name": full_name},
+                    "email_redirect_to": url_for("auth_callback", _external=True),
+                },
+            })
+
+            if not result.user:
+                flash("Registration could not be completed. Please try again.")
+                return render_template("register.html")
+
+            auth_user_id = str(result.user.id)
+            # Supabase handles verification. Keep the app profile inactive until first
+            # successful sign-in, which Supabase blocks until email confirmation.
             with get_db() as conn:
                 with conn.cursor() as cur:
                     cur.execute("""
-                        INSERT INTO users
-                            (full_name, email, password_hash, role, status)
-                        VALUES (%s, %s, %s, 'user', 'inactive')
-                        RETURNING user_id
-                    """, (full_name, email, password_hash))
-                    user_id = cur.fetchone()["user_id"]
-                    cur.execute("""
-                        INSERT INTO email_verifications (user_id, token, expires_at)
-                        VALUES (%s, %s, %s)
-                    """, (user_id, token, expires_at))
+                        INSERT INTO public.users
+                            (auth_user_id, full_name, email, password_hash, role, status)
+                        VALUES (%s, %s, %s, NULL, 'user', 'active')
+                    """, (auth_user_id, full_name, email))
                 conn.commit()
-        except psycopg2.errors.UniqueViolation:
-            flash("An account with this email already exists.")
-            return render_template("register.html")
-        except psycopg2.Error:
-            app.logger.exception("Registration database error")
-            flash("Database error. Check the server logs and Supabase connection.")
-            return render_template("register.html")
 
-        verify_url = url_for("verify_email", token=token, _external=True)
-        # Development only: configure an email provider before production use.
-        app.logger.warning("Verification link for %s: %s", email, verify_url)
-        flash("Registration saved. For development, the verification link is in the server terminal.")
-        return redirect(url_for("login"))
+            flash("Registration submitted. Check your email to verify your account.")
+            return redirect(url_for("login"))
+
+        except Exception:
+            app.logger.exception("Supabase registration failed")
+            flash("Registration failed. Check your email or try again later.")
+            return render_template("register.html")
 
     return render_template("register.html")
 
+
+@app.route("/auth/callback")
+def auth_callback():
+    # Supabase completes email confirmation before redirecting here.
+    flash("If you have verified your email, you can now log in.")
+    return redirect(url_for("login"))
+
+
 @app.route("/verify/<token>")
 def verify_email(token):
-    with get_db() as conn:
-        with conn.cursor() as cur:
-            cur.execute("""
-                SELECT user_id, expires_at
-                FROM email_verifications
-                WHERE token = %s
-            """, (token,))
-            record = cur.fetchone()
-
-            if not record or record["expires_at"] < datetime.utcnow():
-                flash("Verification link is invalid or expired.")
-                return redirect(url_for("login"))
-
-            cur.execute(
-                "UPDATE users SET status = 'active' WHERE user_id = %s",
-                (record["user_id"],),
-            )
-            cur.execute(
-                "DELETE FROM email_verifications WHERE user_id = %s",
-                (record["user_id"],),
-            )
-        conn.commit()
-
-    flash("Email verified. You can now log in.")
+    # Legacy route retained to avoid broken old links. New verification is handled by Supabase.
+    flash("Email verification is now handled by Supabase. Use the latest verification email.")
     return redirect(url_for("login"))
+
 
 @app.route("/login", methods=["GET", "POST"])
 def login():
@@ -209,101 +232,120 @@ def login():
         email = request.form.get("email", "").strip().lower()
         password = request.form.get("password", "")
 
-        with get_db() as conn:
-            with conn.cursor() as cur:
-                cur.execute("SELECT * FROM users WHERE email = %s", (email,))
-                user = cur.fetchone()
+        try:
+            auth = get_auth_client()
+            result = auth.auth.sign_in_with_password({"email": email, "password": password})
+            if not result.user:
+                flash("Invalid email or password.")
+                return render_template("login.html")
 
-        if not user or not check_password_hash(user["password_hash"], password):
-            flash("Invalid email or password.")
-        elif user["status"] != "active":
-            flash("Account is inactive. Verify your email or contact the administrator.")
-        else:
+            auth_user_id = str(result.user.id)
+            with get_db() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        SELECT user_id, email, role, status
+                        FROM public.users WHERE auth_user_id = %s
+                    """, (auth_user_id,))
+                    user = cur.fetchone()
+
+            if not user:
+                try:
+                    auth.auth.sign_out()
+                except Exception:
+                    pass
+                flash("Your account profile was not found. Contact the administrator.")
+                return render_template("login.html")
+
+            if user["status"] != "active":
+                try:
+                    auth.auth.sign_out()
+                except Exception:
+                    pass
+                flash("Your account is inactive. Contact the administrator.")
+                return render_template("login.html")
+
             session.clear()
             session.permanent = True
             session["user_id"] = user["user_id"]
             session["email"] = user["email"]
             session["role"] = user["role"]
+            session["supabase_user_id"] = auth_user_id
+            # Tokens are not placed in the Flask cookie. For this app, the server SDK
+            # authenticates the request and Flask keeps its own signed session.
             return redirect(url_for("dashboard"))
 
+        except Exception:
+            app.logger.exception("Supabase login failed")
+            flash("Login failed. Check your email, password, and email verification.")
+
     return render_template("login.html")
+
 
 @app.route("/forgot-password", methods=["GET", "POST"])
 def forgot_password():
     if request.method == "POST":
         email = request.form.get("email", "").strip().lower()
-
-        with get_db() as conn:
-            with conn.cursor() as cur:
-                cur.execute("SELECT user_id FROM users WHERE email = %s", (email,))
-                user = cur.fetchone()
-
-                if user:
-                    token = secrets.token_urlsafe(32)
-                    expires_at = datetime.utcnow() + timedelta(minutes=30)
-                    cur.execute("""
-                        INSERT INTO password_resets (user_id, token, expires_at)
-                        VALUES (%s, %s, %s)
-                        ON CONFLICT (user_id) DO UPDATE
-                        SET token = EXCLUDED.token,
-                            expires_at = EXCLUDED.expires_at
-                    """, (user["user_id"], token, expires_at))
-                    reset_url = url_for("reset_password", token=token, _external=True)
-                    # Development only: configure an email provider before production use.
-                    app.logger.warning("Password reset link for %s: %s", email, reset_url)
-                conn.commit()
-
-        flash("If the email exists, a reset link has been generated. In development, check the server terminal.")
+        if not email:
+            flash("Enter your email address.")
+            return render_template("forgot_password.html")
+        try:
+            get_auth_client().auth.reset_password_for_email(
+                email,
+                {"redirect_to": url_for("reset_password", _external=True)},
+            )
+        except Exception:
+            # Do not reveal whether an email exists.
+            app.logger.exception("Supabase password reset request failed")
+        flash("If an account exists for that email, a password reset email will be sent.")
         return redirect(url_for("login"))
-
     return render_template("forgot_password.html")
 
-@app.route("/reset-password/<token>", methods=["GET", "POST"])
-def reset_password(token):
-    with get_db() as conn:
-        with conn.cursor() as cur:
-            cur.execute("""
-                SELECT user_id, expires_at
-                FROM password_resets
-                WHERE token = %s
-            """, (token,))
-            reset = cur.fetchone()
 
-    if not reset or reset["expires_at"] < datetime.utcnow():
-        flash("Password reset link is invalid or expired.")
-        return redirect(url_for("forgot_password"))
+@app.route("/reset-password", methods=["GET", "POST"])
+def reset_password():
+    if request.method == "GET":
+        # Supabase sends recovery tokens in the URL fragment. Browser JavaScript in
+        # reset_password.html must read the fragment and POST access_token + password.
+        return render_template("reset_password.html")
 
-    if request.method == "POST":
-        password = request.form.get("password", "")
-        if len(password) < 8:
-            flash("Password must contain at least 8 characters.")
+    access_token = request.form.get("access_token", "").strip()
+    password = request.form.get("password", "")
+    if not access_token:
+        flash("The recovery session is missing. Open the latest reset email link again.")
+        return render_template("reset_password.html")
+    if len(password) < 8:
+        flash("Password must contain at least 8 characters.")
+        return render_template("reset_password.html")
+
+    try:
+        recovery_client = get_auth_client()
+        # Supabase recovery links normally provide access_token in the URL fragment.
+        # Supply it as the bearer token to the Auth user endpoint via set_session;
+        # the template also posts refresh_token when supplied.
+        refresh_token = request.form.get("refresh_token", "").strip()
+        if not refresh_token:
+            flash("The recovery session is incomplete. Open the latest reset email link again.")
             return render_template("reset_password.html")
-
-        with get_db() as conn:
-            with conn.cursor() as cur:
-                cur.execute("""
-                    UPDATE users SET password_hash = %s WHERE user_id = %s
-                """, (generate_password_hash(password), reset["user_id"]))
-                cur.execute(
-                    "DELETE FROM password_resets WHERE user_id = %s",
-                    (reset["user_id"],),
-                )
-            conn.commit()
-
-        flash("Password changed. Please log in.")
+        recovery_client.auth.set_session(access_token, refresh_token)
+        recovery_client.auth.update_user({"password": password})
+        flash("Password updated. Please log in with your new password.")
         return redirect(url_for("login"))
+    except Exception:
+        app.logger.exception("Supabase password update failed")
+        flash("Password reset failed or the link expired. Request a new reset email.")
+        return render_template("reset_password.html")
 
-    return render_template("reset_password.html")
 
 @app.route("/dashboard")
 @login_required
 def dashboard():
     user = current_user()
-    if not user or user["status"] != "active":
+    if not user:
         session.clear()
-        flash("Your account is inactive.")
+        flash("Your profile could not be found. Please log in again.")
         return redirect(url_for("login"))
     return render_template("dashboard.html", user=user)
+
 
 @app.route("/admin/users")
 @role_required("admin")
@@ -312,11 +354,11 @@ def admin_users():
         with conn.cursor() as cur:
             cur.execute("""
                 SELECT user_id, full_name, email, role, status, created_at
-                FROM users
-                ORDER BY created_at DESC
+                FROM public.users ORDER BY created_at DESC
             """)
             users = cur.fetchall()
     return render_template("admin_users.html", users=users)
+
 
 @app.route("/logout", methods=["POST"])
 @login_required
@@ -325,10 +367,12 @@ def logout():
     flash("You have been logged out.")
     return redirect(url_for("login"))
 
+
 @app.cli.command("init-db")
 def init_db_command():
     init_db()
     print("Database tables are ready.")
+
 
 if __name__ == "__main__":
     init_db()
