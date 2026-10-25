@@ -1,18 +1,60 @@
+
 {% extends "base.html" %}
+
 {% block title %}Manage Users | User Portal{% endblock %}
+
 {% block content %}
 <section class="card wide">
-  <h1>Registered users</h1>
-  <p class="muted">Admin-only view.</p>
-  <div class="table-wrap"><table>
-    <thead><tr><th>ID</th><th>Name</th><th>Email</th><th>Role</th><th>Status</th><th>Created</th></tr></thead>
-    <tbody>
-    {% for user in users %}
-      <tr><td>{{ user.user_id }}</td><td>{{ user.full_name }}</td><td>{{ user.email }}</td><td>{{ user.role }}</td><td>{{ user.status }}</td><td>{{ user.created_at.strftime('%d %b %Y') }}</td></tr>
-    {% else %}
-      <tr><td colspan="6">No users found.</td></tr>
-    {% endfor %}
-    </tbody>
-  </table></div>
+    <p class="eyebrow">ADMIN PANEL</p>
+
+    <h1>Registered Users</h1>
+
+    <p class="muted">
+        View and monitor registered user accounts.
+    </p>
+
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th scope="col">ID</th>
+                    <th scope="col">Name</th>
+                    <th scope="col">Email</th>
+                    <th scope="col">Role</th>
+                    <th scope="col">Status</th>
+                    <th scope="col">Created</th>
+                </tr>
+            </thead>
+
+            <tbody>
+                {% for user in users %}
+                <tr>
+                    <td>{{ user.user_id }}</td>
+                    <td>{{ user.full_name }}</td>
+                    <td>{{ user.email }}</td>
+                    <td>{{ user.role | title }}</td>
+                    <td>
+                        <span class="status status-{{ user.status }}">
+                            {{ user.status | title }}
+                        </span>
+                    </td>
+                    <td>
+                        {{ user.created_at.strftime('%d %b %Y') if user.created_at else 'N/A' }}
+                    </td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="6">No users found.</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <div class="actions" style="margin-top: 20px;">
+        <a class="button secondary" href="{{ url_for('dashboard') }}">
+            Back to Dashboard
+        </a>
+    </div>
 </section>
 {% endblock %}

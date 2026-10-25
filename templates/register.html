@@ -1,16 +1,111 @@
+```html
 {% extends "base.html" %}
+
 {% block title %}Register | User Portal{% endblock %}
+
 {% block content %}
 <section class="card">
-  <h1>Create account</h1>
-  <p class="muted">Register with your name, email, and password.</p>
-  <form method="post">
-    <label>Full name<input name="full_name" maxlength="100" required autocomplete="name"></label>
-    <label>Email<input type="email" name="email" maxlength="100" required autocomplete="email"></label>
-    <label>Password<input type="password" name="password" minlength="8" required autocomplete="new-password"></label>
-    <p class="hint">Minimum 8 characters. New registrations receive the standard user role.</p>
-    <button class="button full" type="submit">Register</button>
-  </form>
-  <p class="below">Already registered? <a href="{{ url_for('login') }}">Sign in</a></p>
+    <h1>Create account</h1>
+
+    <p class="muted">
+        Register with your name, email, and password.
+    </p>
+
+    <form method="post" id="registerForm">
+        <label for="full_name">Full name</label>
+        <input
+            type="text"
+            id="full_name"
+            name="full_name"
+            maxlength="100"
+            required
+            autocomplete="name"
+            placeholder="Enter your full name"
+        >
+
+        <label for="email">Email address</label>
+        <input
+            type="email"
+            id="email"
+            name="email"
+            maxlength="100"
+            required
+            autocomplete="email"
+            placeholder="you@example.com"
+        >
+
+        <label for="password">Password</label>
+        <input
+            type="password"
+            id="password"
+            name="password"
+            minlength="8"
+            required
+            autocomplete="new-password"
+            placeholder="At least 8 characters"
+        >
+
+        <label for="confirm_password">Confirm password</label>
+        <input
+            type="password"
+            id="confirm_password"
+            name="confirm_password"
+            minlength="8"
+            required
+            autocomplete="new-password"
+            placeholder="Re-enter your password"
+        >
+
+        <p class="hint">
+            Minimum 8 characters. New accounts receive the standard user role.
+        </p>
+
+        <p id="formMessage" role="alert" class="muted"></p>
+
+        <button class="button full" type="submit" id="registerButton">
+            Register
+        </button>
+    </form>
+
+    <p class="below">
+        Already registered?
+        <a href="{{ url_for('login') }}">Sign in</a>
+    </p>
+
+    <p class="below muted">
+        After registering, check your inbox and spam folder for the
+        Supabase email confirmation link.
+    </p>
 </section>
+
+<script>
+    const form = document.getElementById("registerForm");
+    const password = document.getElementById("password");
+    const confirmPassword = document.getElementById("confirm_password");
+    const message = document.getElementById("formMessage");
+    const button = document.getElementById("registerButton");
+
+    form.addEventListener("submit", function (event) {
+        message.textContent = "";
+
+        if (password.value.length < 8) {
+            event.preventDefault();
+            message.textContent =
+                "Password must contain at least 8 characters.";
+            password.focus();
+            return;
+        }
+
+        if (password.value !== confirmPassword.value) {
+            event.preventDefault();
+            message.textContent = "Passwords do not match.";
+            confirmPassword.focus();
+            return;
+        }
+
+        button.disabled = true;
+        button.textContent = "Creating account...";
+    });
+</script>
 {% endblock %}
+```

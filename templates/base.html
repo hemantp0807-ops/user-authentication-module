@@ -1,33 +1,79 @@
-<!doctype html>
+
+<!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{% block title %}User Authentication Module{% endblock %}</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+
+    <title>{% block title %}User Authentication Module{% endblock %}</title>
+
+    <meta
+        name="description"
+        content="Secure user authentication portal with email verification and account management."
+    >
+
+    <link
+        rel="stylesheet"
+        href="{{ url_for('static', filename='style.css') }}"
+    >
+
+    {% block head %}{% endblock %}
 </head>
+
 <body>
-<header class="topbar">
-  <a class="brand" href="{{ url_for('index') }}">User Portal</a>
-  <nav>
-    {% if logged_in_user %}
-      <a href="{{ url_for('dashboard') }}">Dashboard</a>
-      {% if logged_in_user.role == 'admin' %}<a href="{{ url_for('admin_users') }}">Users</a>{% endif %}
-      <form class="inline" action="{{ url_for('logout') }}" method="post">
-        <button class="link-button" type="submit">Logout</button>
-      </form>
-    {% else %}
-      <a href="{{ url_for('login') }}">Login</a>
-      <a href="{{ url_for('register') }}">Register</a>
-    {% endif %}
-  </nav>
-</header>
-<main class="container">
-  {% with messages = get_flashed_messages() %}
-    {% if messages %}<section class="messages">{% for message in messages %}<p>{{ message }}</p>{% endfor %}</section>{% endif %}
-  {% endwith %}
-  {% block content %}{% endblock %}
-</main>
-<footer>Python · Flask · PostgreSQL</footer>
+    <header class="topbar">
+        <a class="brand" href="{{ url_for('index') }}">
+            User Portal
+        </a>
+
+        <nav aria-label="Main navigation">
+            {% if logged_in_user %}
+                <a href="{{ url_for('dashboard') }}">
+                    Dashboard
+                </a>
+
+                {% if logged_in_user.role == 'admin' %}
+                    <a href="{{ url_for('admin_users') }}">
+                        Manage Users
+                    </a>
+                {% endif %}
+
+                <form
+                    class="inline"
+                    action="{{ url_for('logout') }}"
+                    method="post"
+                >
+                    <button class="link-button" type="submit">
+                        Logout
+                    </button>
+                </form>
+            {% else %}
+                <a href="{{ url_for('login') }}">Login</a>
+                <a href="{{ url_for('register') }}">Register</a>
+            {% endif %}
+        </nav>
+    </header>
+
+    <main class="container">
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                <section class="messages" aria-live="polite">
+                    {% for category, message in messages %}
+                        <p class="message {{ category }}">
+                            {{ message }}
+                        </p>
+                    {% endfor %}
+                </section>
+            {% endif %}
+        {% endwith %}
+
+        {% block content %}{% endblock %}
+    </main>
+
+    <footer>
+        <p>Python · Flask · PostgreSQL · Supabase Auth</p>
+    </footer>
+
+    {% block scripts %}{% endblock %}
 </body>
 </html>

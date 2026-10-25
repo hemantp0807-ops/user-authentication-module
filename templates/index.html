@@ -1,10 +1,32 @@
+
 {% extends "base.html" %}
+
 {% block title %}Welcome | User Portal{% endblock %}
+
 {% block content %}
 <section class="hero">
-  <p class="eyebrow">USER AUTHENTICATION MODULE</p>
-  <h1>Secure access, made simple.</h1>
-  <p>Register an account, verify your email, and access your dashboard securely.</p>
-  <div class="actions"><a class="button" href="{{ url_for('register') }}">Create account</a><a class="button secondary" href="{{ url_for('login') }}">Sign in</a></div>
+    <p class="eyebrow">USER AUTHENTICATION MODULE</p>
+
+    <h1>Secure access, made simple.</h1>
+
+    <p>
+        Create your account, verify your email securely, and access
+        your personal dashboard.
+    </p>
+
+    <div class="actions">
+        <a class="button" href="{{ url_for('register') }}">
+            Create Account
+        </a>
+
+        <a class="button secondary" href="{{ url_for('login') }}">
+            Sign In
+        </a>
+    </div>
+
+    <p class="muted" style="margin-top: 24px;">
+        New account? Check your inbox for the Supabase confirmation email
+        after registering.
+    </p>
 </section>
 {% endblock %}
